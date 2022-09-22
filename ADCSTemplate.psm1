@@ -11,15 +11,16 @@ param ([int]$Length)
 }
 
 Function IsUniqueOID {
-param ($cn,$TemplateOID,$Server,$ConfigNC)
+param ($cn,$TemplateOID,$Server,$ConfigNC,$Credential)
     $Search = Get-ADObject -Server $Server `
         -SearchBase "CN=OID,CN=Public Key Services,CN=Services,$ConfigNC" `
-        -Filter {cn -eq $cn -and msPKI-Cert-Template-OID -eq $TemplateOID}
+        -Filter {cn -eq $cn -and msPKI-Cert-Template-OID -eq $TemplateOID} `
+        -Credential $Credential
     If ($Search) {$False} Else {$True}
 }
 
 Function New-TemplateOID {
-Param($Server,$ConfigNC)
+Param($Server,$ConfigNC,$Credential)
     <#
     OID CN/Name                                                         [10000000-99999999].[32 hex characters (MD5hash)]
     OID msPKI-Cert-Template-OID    [Forest base OID].[1000000-99999999].[10000000-99999999]  <--- second number same as first number in OID name
@@ -28,13 +29,13 @@ Param($Server,$ConfigNC)
         $OID_Part_1 = Get-Random -Minimum 10000000 -Maximum 99999999
         $OID_Part_2 = Get-Random -Minimum 10000000 -Maximum 99999999
         $OID_Part_3 = Get-RandomHex -Length 32
-        $OID_Forest = Get-ADObject -Server $Server `
+        $OID_Forest = Get-ADObject -Server $Server -Credential $Credential `
             -Identity "CN=OID,CN=Public Key Services,CN=Services,$ConfigNC" `
             -Properties msPKI-Cert-Template-OID |
             Select-Object -ExpandProperty msPKI-Cert-Template-OID
         $msPKICertTemplateOID = "$OID_Forest.$OID_Part_1.$OID_Part_2"
         $Name = "$OID_Part_2.$OID_Part_3"
-    } until (IsUniqueOID -cn $Name -TemplateOID $msPKICertTemplateOID -Server $Server -ConfigNC $ConfigNC)
+    } until (IsUniqueOID -cn $Name -TemplateOID $msPKICertTemplateOID -Server $Server -ConfigNC $ConfigNC -Credential $Credential)
     Return @{
         TemplateOID  = $msPKICertTemplateOID
         TemplateName = $Name
@@ -75,7 +76,9 @@ param(
     $DisplayName,
 
     [string]
-    $Server = (Get-ADDomainController -Discover -ForceDiscover -Writable).HostName[0]
+    $Server = (Get-ADDomainController -Discover -ForceDiscover -Writable).HostName[0],
+
+    $Credential
 )
     If ($PSBoundParameters.ContainsKey('DisplayName')) {
         $LDAPFilter = "(&(objectClass=pKICertificateTemplate)(displayName=$DisplayName))"
@@ -83,9 +86,9 @@ param(
         $LDAPFilter = '(objectClass=pKICertificateTemplate)'
     }
 
-    $ConfigNC     = $((Get-ADRootDSE -Server $Server).configurationNamingContext)
+    $ConfigNC     = $((Get-ADRootDSE -Server $Server -Credential $Credential).configurationNamingContext)
     $TemplatePath = "CN=Certificate Templates,CN=Public Key Services,CN=Services,$ConfigNC"
-    Get-ADObject -SearchScope Subtree -SearchBase $TemplatePath -LDAPFilter $LDAPFilter -Properties * -Server $Server
+    Get-ADObject -SearchScope Subtree -SearchBase $TemplatePath -LDAPFilter $LDAPFilter -Properties * -Server $Server -Credential $Credential
 }
 
 
@@ -126,10 +129,11 @@ param(
     [string]$Type = 'Allow',
     [string[]]$Identity,
     [switch]$Enroll,
-    [switch]$AutoEnroll
+    [switch]$AutoEnroll,
+    $Credential
 )
     ## Potential issue here that the AD: drive may not be targetting the selected DC in the -SERVER parameter
-    $TemplatePath        = "AD:\" + (Get-ADCSTemplate -DisplayName $DisplayName -Server $Server).DistinguishedName
+    $TemplatePath        = "AD:\" + (Get-ADCSTemplate -DisplayName $DisplayName -Server $Server -Credential $Credential).DistinguishedName
     $acl                 = Get-ACL $TemplatePath
     $InheritedObjectType = [GUID]'00000000-0000-0000-0000-000000000000'
     ForEach ($Group in $Identity) {
@@ -271,14 +275,15 @@ param(
     [string]$Server = (Get-ADDomainController -Discover -ForceDiscover -Writable).HostName[0],
     [string[]]$Identity, # = "$((Get-ADDomain).NetBIOSName)\Domain Computers",
     [switch]$AutoEnroll,
-    [switch]$Publish
+    [switch]$Publish,
+    $Credential
 )
     ### Put GroupName and AutoEnroll into a parameter set
 
     # Manually import AD module to get AD: drive used later for permissions
     Import-Module ActiveDirectory -Verbose:$false
 
-    $ConfigNC = $((Get-ADRootDSE -Server $Server).configurationNamingContext)
+    $ConfigNC = $((Get-ADRootDSE -Server $Server -Credential $Credential).configurationNamingContext)
 
     #region CREATE OID
     <#
@@ -293,14 +298,14 @@ param(
     ObjectCategory                  : CN=ms-PKI-Enterprise-Oid,CN=Schema,CN=Configuration,DC=contoso,DC=com
     ObjectClass                     : msPKI-Enterprise-Oid
     #>
-    $OID = New-TemplateOID -Server $Server -ConfigNC $ConfigNC
+    $OID = New-TemplateOID -Server $Server -ConfigNC $ConfigNC -Credential $Credential
     $TemplateOIDPath = "CN=OID,CN=Public Key Services,CN=Services,$ConfigNC"
     $oa = @{
 	    'DisplayName' = $DisplayName
 	    'flags' = [System.Int32]'1'
 	    'msPKI-Cert-Template-OID' = $OID.TemplateOID
     }
-    New-ADObject -Path $TemplateOIDPath -OtherAttributes $oa -Name $OID.TemplateName -Type 'msPKI-Enterprise-Oid' -Server $Server
+    New-ADObject -Path $TemplateOIDPath -OtherAttributes $oa -Name $OID.TemplateName -Type 'msPKI-Enterprise-Oid' -Server $Server -Credential $Credential
     #endregion
 
     #region CREATE TEMPLATE
@@ -327,7 +332,8 @@ param(
             { $_ -in 'msPKI-Certificate-Application-Policy',
                     'pKICriticalExtensions',
                     'pKIDefaultCSPs',
-                    'pKIExtendedKeyUsage'
+                    'pKIExtendedKeyUsage',
+                    'msPKI-RA-Application-Policies'
             } { $oa.Add($_,[Microsoft.ActiveDirectory.Management.ADPropertyValueCollection]$import.$_); break }
 
             { $_ -in 'pKIExpirationPeriod',
@@ -339,16 +345,16 @@ param(
     }
     $TemplatePath = "CN=Certificate Templates,CN=Public Key Services,CN=Services,$ConfigNC"
     New-ADObject -Path $TemplatePath -OtherAttributes $oa -Name $DisplayName.Replace(' ','') `
-        -DisplayName $DisplayName -Type pKICertificateTemplate -Server $Server
+        -DisplayName $DisplayName -Type pKICertificateTemplate -Server $Server -Credential $Credential
     #endregion
 
     #region PERMISSIONS
     ## Potential issue here that the AD: drive may not be targetting the selected DC in the -SERVER parameter
     If ($PSBoundParameters.ContainsKey('Identity')) {
         If ($AutoEnroll) {
-            Set-ADCSTemplateACL -DisplayName $DisplayName -Server $Server -Type Allow -Identity $Identity -Enroll -AutoEnroll
+            Set-ADCSTemplateACL -DisplayName $DisplayName -Server $Server -Type Allow -Identity $Identity -Enroll -AutoEnroll -Credential $Credential
         } Else {
-            Set-ADCSTemplateACL -DisplayName $DisplayName -Server $Server -Type Allow -Identity $Identity -Enroll
+            Set-ADCSTemplateACL -DisplayName $DisplayName -Server $Server -Type Allow -Identity $Identity -Enroll -Credential $Credential
         }
     }
     #endregion
@@ -357,9 +363,9 @@ param(
     If ($Publish) {
         ### WARNING: Issues on all available CAs. Test in your environment.
         $EnrollmentPath = "CN=Enrollment Services,CN=Public Key Services,CN=Services,$ConfigNC"
-        $CAs = Get-ADObject -SearchBase $EnrollmentPath -SearchScope OneLevel -Filter * -Server $Server
+        $CAs = Get-ADObject -SearchBase $EnrollmentPath -SearchScope OneLevel -Filter * -Server $Server -Credential $Credential
         ForEach ($CA in $CAs) {
-            Set-ADObject -Identity $CA.DistinguishedName -Add @{certificateTemplates=$DisplayName.Replace(' ','')} -Server $Server
+            Set-ADObject -Identity $CA.DistinguishedName -Add @{certificateTemplates=$DisplayName.Replace(' ','')} -Server $Server -Credential $Credential
         }
     }
     #endregion
