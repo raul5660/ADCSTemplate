@@ -163,6 +163,7 @@ param(
         }
     }
     Invoke-Command `
+        -ComputerName "." `
         -Credential $Credential `
         -ScriptBlock { Param($acl, $TemplatePath) Set-ACL -Path $TemplatePath -AclObject $acl} `
         -ArgumentList $acl, $TemplatePath
