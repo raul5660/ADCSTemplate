@@ -134,7 +134,7 @@ param(
 )
     ## Potential issue here that the AD: drive may not be targetting the selected DC in the -SERVER parameter
     $TemplatePath        = "AD:\" + (Get-ADCSTemplate -DisplayName $DisplayName -Server $Server -Credential $Credential).DistinguishedName
-    $acl                 = Get-ACL $TemplatePath
+    $acl                 = Inoke-Command -ComputerName "." -Credential $Credential -ScriptBlock { Param($TemplatePath) Get-ACL $TemplatePath } -ArgumentList $TemplatePath
     $InheritedObjectType = [GUID]'00000000-0000-0000-0000-000000000000'
     ForEach ($Group in $Identity) {
         $account = New-Object System.Security.Principal.NTAccount($Group)
