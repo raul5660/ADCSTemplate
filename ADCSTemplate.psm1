@@ -162,7 +162,10 @@ param(
             $acl.AddAccessRule($ace)
         }
     }
-    Set-ACL $TemplatePath -AclObject $acl
+    Invoke-Command -ComputerName "." -Credential $Credential -ScriptBlock {
+        param($acl, $TemplatePath)
+        Set-ACL $TemplatePath -AclObject $acl
+    } -ArgumentList $acl, $TemplatePath
 }
 
 
