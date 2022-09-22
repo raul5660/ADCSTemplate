@@ -276,7 +276,7 @@ param(
     [string]$DisplayName,   # name in JSON export is ignored
     [parameter(Mandatory)]
     [string]$JSON,
-    [string]$Server = (Get-ADDomainController -Discover -ForceDiscover -Writable).HostName[0],
+    #[string]$Server = (Get-ADDomainController -Discover -ForceDiscover -Writable).HostName[0],
     [string[]]$Identity, # = "$((Get-ADDomain).NetBIOSName)\Domain Computers",
     [switch]$AutoEnroll,
     [switch]$Publish,
@@ -286,7 +286,7 @@ param(
 
     # Manually import AD module to get AD: drive used later for permissions
     Import-Module ActiveDirectory -Verbose:$false
-
+    $Server = (Get-ADDomainController -Discover -ForceDiscover -Writable).HostName[0]
     $ConfigNC = $((Get-ADRootDSE -Server $Server -Credential $Credential).configurationNamingContext)
 
     #region CREATE OID
